@@ -190,17 +190,22 @@ double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Ob
   v3_assign(diffuse_add, 0, 0, 0);
   v3_assign(specular_add, 0, 0, 0);
 
+  //Getting intersection point
   v3_scale(Rdt, Rd, closest_t);
   v3_add(intersection_point, Ro, Rdt);
   v3_assign(color_array, 0, 0, 0);
+  
   if (closest_t != INFINITY){
     for (int i = 0; i < light_count; i++){
       Object l = light_array[i];
       Ro2 = intersection_point;
-    
+
+      //Normalizing Rd2
       v3_sub(Rd2, l.position, intersection_point);
       double mag = sqrt(pow(Rd2[0], 2) + pow(Rd2[1], 2) + pow(Rd2[2], 2));
       v3_assign(Rd2, Rd2[0]/mag, Rd2[1]/mag, Rd2[2]/mag);
+
+      //checking to see if light hits object
       int hit = raycast_primitive(Rd2, Ro2, closest_obj);
       if (hit != 1){
 	break;
@@ -219,22 +224,27 @@ double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Ob
       if (l.alpha < l.theta){
 	f_ang = 1.0;
       }
-      diff = idiff(closest_obj, l, intersection_point);
-      v3_add(diffuse_add, diffuse_add, diff);
-      v3_add(specular_add, specular_add, ispec(closest_obj, l, intersection_point));
-      v3_add(color_array, diffuse_add, specular_add);
+      
+      
+      if (closest_obj.kind == 2){
+	diff = idiff(closest_obj, l, intersection_point);
+	v3_add(diffuse_add, diffuse_add, diff);
+	spec = ispec(closest_obj, l, intersection_point);
+	v3_add(specular_add, specular_add, spec);
+	v3_add(color_array, diffuse_add, specular_add);
+      }
+
+      if (closest_obj.kind == 3){
+	printf("in plane\n");
+	diff = idiff(closest_obj, l, intersection_point);
+	v3_add(diffuse_add, diffuse_add, diff);
+	v3_add(color_array, color_array, diffuse_add);
+      }
+      
       attenuation = f_rad * f_ang;
       v3_scale(color_array, color_array, attenuation);
     }
     return(color_array);
-    /*
-      if (closest_t == INFINITY){
-      return(background);
-      }else{
-      color_array = closest_obj.color;
-      }
-      return(color_array);
-    */
   }else{
     return(color_array);
   }
@@ -313,7 +323,7 @@ double* ispec(Object obj, Object light, double* intersection){
 
     dot = v3_dot(V, R);
     if (dot > 0){
-      dot = pow(dot, 20);
+      dot = pow(dot, 100);
       r = obj.specular[0] * light.color[0] * dot;
       g = obj.specular[1] * light.color[1] * dot;
       b = obj.specular[2] * light.color[2] * dot;
