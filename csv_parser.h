@@ -6,7 +6,7 @@
 typedef struct{
   int kind;
   double position[3], color[3], normal[3], diffuse[3], specular[3];
-  double width, height, radius, theta, radial_a0, radial_a1, radial_a2;
+  double width, height, radius, theta, alpha, radial_a0, radial_a1, radial_a2;
 }Object;
 
 int parse_width(FILE *fh, Object *obj);

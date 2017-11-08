@@ -36,3 +36,10 @@ static inline void v3_assign(V3 c, double val1, double val2, double val3){
   c[1] = val2;
   c[2] = val3;
 }
+
+static inline double v3_distance(V3 a, V3 b){
+  double c;
+  c = pow(a[0] - b[0], 2) + pow(a[1] - b[1], 2) + pow(a[2] - b[2], 2);
+  c = sqrt(c);
+  return c;
+}

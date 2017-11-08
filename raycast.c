@@ -12,10 +12,13 @@ typedef struct PPMImage{
   Pixel *pix_info;
 }PPM_Image;
 
-double* raycast(V3 Rd, V3 Ro, int count, Object *array, double* background);
-Pixel* render(int width, int height, Object camera, Object *array, int count);
+double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Object*light_array, double* background);
+Pixel* render (int width, int height, Object camera, Object *obj_array, int obj_count, Object *light_array, int light_count);
 double sphere_intersection(V3 Rd, V3 Ro, Object obj);
 double plane_intersection(V3 Rd, V3 Ro, Object obj);
+double* idiff(Object obj, Object light, double* intersection);
+double* ispec(Object obj, Object light, double* intersection);
+double clamp(double v);
 
 int main (int argc, char *argv[]) {
   //checking for the right amout of arguments
@@ -26,6 +29,7 @@ int main (int argc, char *argv[]) {
   
   int obj_count = 0;
   int light_count = 0;
+  Object light_array[128];
   Object obj_array[128];
   int width = atoi(argv[1]);
   int height = atoi(argv[2]);
@@ -72,6 +76,7 @@ int main (int argc, char *argv[]) {
 
   for (int i = 0; i < obj_count; i++) {
     if (obj_array[i].kind == 4) {
+      light_array[light_count] = obj_array[i];
       light_count++;
     }
   }
@@ -97,8 +102,9 @@ int main (int argc, char *argv[]) {
       return(1);
     }
   }
-  
-  pix_image = render(width, height, camera_ptr, obj_array, obj_count);
+
+
+  pix_image = render(width, height, camera_ptr, obj_array, obj_count, light_array, light_count);
   
   //Writing P3 to file
   fprintf(output_file, "%s\n", "P3");
@@ -120,16 +126,34 @@ int main (int argc, char *argv[]) {
   
   return(0);
 }
+int raycast_primitive(V3 Rd, V3 Ro, Object closest_object){
+  double t;
+  if (closest_object.kind == 2){
+    //sphere intersection
+    t = sphere_intersection(Rd, Ro, closest_object);
+  }
 
-double* raycast (V3 Rd, V3 Ro, int count, Object *array, double* background){
+  if (closest_object.kind == 3){
+    //plane intersection
+    t = plane_intersection(Rd, Ro, closest_object);
+  }
+
+  if (t != INFINITY){
+    return(1);
+  }else{
+    return(0);
+  }
+}
+
+double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Object*light_array, double* background){
   Object closest_obj;
   double* background_color = background; 
-  double* color_array;
+  double* color_array = malloc(sizeof(double) * 3);
   double closest_t = INFINITY;
   double t;
   Object obj;
   
-  for (int i = 0; i < count; i++){
+  for (int i = 0; i < obj_count; i++){
     obj = array[i];
     if (obj.kind == 2){
       //sphere intersection
@@ -150,15 +174,184 @@ double* raycast (V3 Rd, V3 Ro, int count, Object *array, double* background){
     }
   }
 
-  if (closest_t == INFINITY){
-    return(background);
+  //Modify here
+  double* Rdt = malloc(sizeof(double) * 3);
+  double* intersection_point = malloc(sizeof(double) * 3);
+  double* Ro2 = malloc(sizeof(double) * 3);
+  double* Rd2 = malloc(sizeof(double) * 3);
+  double* Vo = malloc(sizeof(double) * 3);
+  double* diffuse_add = malloc(sizeof(double) * 3);
+  double* specular_add = malloc(sizeof(double) * 3);
+  double* diff = malloc(sizeof(double) * 3);
+  double* spec = malloc(sizeof(double) * 3);
+  double attenuation;
+
+  //Getting arrays to add the diffuse and specualr reflections
+  v3_assign(diffuse_add, 0, 0, 0);
+  v3_assign(specular_add, 0, 0, 0);
+
+  v3_scale(Rdt, Rd, closest_t);
+  v3_add(intersection_point, Ro, Rdt);
+  v3_assign(color_array, 0, 0, 0);
+  if (closest_t != INFINITY){
+    for (int i = 0; i < light_count; i++){
+      Object l = light_array[i];
+      Ro2 = intersection_point;
+    
+      v3_sub(Rd2, l.position, intersection_point);
+      double mag = sqrt(pow(Rd2[0], 2) + pow(Rd2[1], 2) + pow(Rd2[2], 2));
+      v3_assign(Rd2, Rd2[0]/mag, Rd2[1]/mag, Rd2[2]/mag);
+      int hit = raycast_primitive(Rd2, Ro2, closest_obj);
+      if (hit != 1){
+	break;
+      }
+      double f_rad = 1.0;
+      double f_ang = 1.0;
+      
+      double dl = v3_distance(l.position, intersection_point);
+      v3_sub(Vo, intersection_point, l.position);
+      // Radial attenuation
+      if (dl != INFINITY) {
+	f_rad = 1 / (l.radial_a2 * dl * dl + l.radial_a1 * dl + l.radial_a0);
+      }
+
+      // Angular attenuation
+      if (l.alpha < l.theta){
+	f_ang = 1.0;
+      }
+      diff = idiff(closest_obj, l, intersection_point);
+      v3_add(diffuse_add, diffuse_add, diff);
+      v3_add(specular_add, specular_add, ispec(closest_obj, l, intersection_point));
+      v3_add(color_array, diffuse_add, specular_add);
+      attenuation = f_rad * f_ang;
+      v3_scale(color_array, color_array, attenuation);
+    }
+    return(color_array);
+    /*
+      if (closest_t == INFINITY){
+      return(background);
+      }else{
+      color_array = closest_obj.color;
+      }
+      return(color_array);
+    */
   }else{
-    color_array = closest_obj.color;
+    return(color_array);
   }
-  return(color_array);
 }
 
-Pixel* render (int width, int height, Object camera, Object *array, int count){
+double* idiff(Object obj, Object light, double* intersection){
+  // Allocating space for light vector
+  double* L = malloc(sizeof(double) * 3);
+  double* diff_array = malloc(sizeof(double) * 3);
+  double dot, r, g, b;
+  v3_assign(diff_array, 0, 0, 0);
+  // Calculating light vector
+  v3_sub(L, light.position, intersection);
+  
+  if (obj.kind == 2){
+    // Creating normal vector
+    double* N = malloc(sizeof(double) * 3);
+    double x, y, z;
+    x = (intersection[0] - obj.position[0])/obj.radius;
+    y = (intersection[1] - obj.position[1])/obj.radius;
+    z = (intersection[2] - obj.position[2])/obj.radius;
+    v3_assign(N, x, y, z);
+
+    dot = v3_dot(N, L);
+    if (dot > 0) {
+      r = obj.diffuse[0] * light.color[0] * dot;
+      g = obj.diffuse[1] * light.color[0] * dot;
+      b = obj.diffuse[2] * light.color[2] * dot;
+
+      v3_assign(diff_array, r, g, b);
+      return(diff_array);
+    }else{
+      v3_assign(diff_array, 0, 0, 0);
+      return(diff_array);
+    }
+    return(diff_array);
+  }
+ 
+  if (obj.kind == 3) {
+    dot = v3_dot(obj.normal, L);
+    if (dot > 0) {
+      r = obj.diffuse[0] * light.color[0] * dot;
+      g = obj.diffuse[1] * light.color[0] * dot;
+      b = obj.diffuse[2] * light.color[2] * dot;
+
+      v3_assign(diff_array, r, g, b);
+      return(diff_array);
+    }else{
+      v3_assign(diff_array, 0, 0, 0);
+      return(diff_array);
+    }
+  }
+}
+
+double* ispec(Object obj, Object light, double* intersection){
+  double* V = malloc(sizeof(double) * 3);
+  double* R = malloc(sizeof(double) * 3);
+  double* spec_array = malloc(sizeof(double) * 3);
+  double vn, r, g, b, dot;
+  v3_scale(V, intersection, -1);
+
+  if (obj.kind == 2){
+    //Creating the normal
+    double* N = malloc(sizeof(double) * 3);
+    double x, y, z;
+    x = (intersection[0] - obj.position[0])/obj.radius;
+    y = (intersection[1] - obj.position[1])/obj.radius;
+    z = (intersection[2] - obj.position[2])/obj.radius;
+    v3_assign(N, x, y, z);
+
+    //Creating R
+    vn = v3_dot(V, N);
+    vn = vn * 2;
+    v3_sub(R, N, V);
+    v3_scale(R, R, vn);
+
+    dot = v3_dot(V, R);
+    if (dot > 0){
+      dot = pow(dot, 20);
+      r = obj.specular[0] * light.color[0] * dot;
+      g = obj.specular[1] * light.color[1] * dot;
+      b = obj.specular[2] * light.color[2] * dot;
+
+      v3_assign(spec_array, r, g, b);
+      return(spec_array);
+    }else{
+      v3_assign(spec_array, 0, 0, 0);
+      return(spec_array);
+    }
+  }
+
+  if (obj.kind == 3){
+    //Creating R
+    vn = v3_dot(V, obj.normal);
+    vn = vn * 2;
+    v3_sub(R, obj.normal, V);
+    v3_scale(R, R, vn);
+
+    dot = v3_dot(V, R);
+    if (dot > 0){
+      dot = pow(dot, 20);
+      r = obj.specular[0] * light.color[0] * dot;
+      g = obj.specular[1] * light.color[1] * dot;
+      b = obj.specular[2] * light.color[2] * dot;
+
+      v3_assign(spec_array, r, g, b);
+      return(spec_array);
+    }else{
+      v3_assign(spec_array, 0, 0, 0);
+      return(spec_array);
+    }
+  }
+}
+    
+    
+    
+Pixel* render (int width, int height, Object camera, Object *obj_array, int obj_count, Object *light_array, int light_count){
   Pixel *pix_info;
   double *color;
   double background[3] = {0.97647, 0.513725, 0.12549};
@@ -191,16 +384,23 @@ Pixel* render (int width, int height, Object camera, Object *array, int count){
 		Rd[1]/mag,
 		Rd[2]/mag);
 
-      
-      color = raycast(Rd, Ro, count, array, background);
-      
-      pix_info[current_pix].r = (color[0] * 255);
-      pix_info[current_pix].g = (color[1] * 255);
-      pix_info[current_pix].b = (color[2] * 255);
+      color = raycast(Rd, Ro, obj_count, light_count, obj_array, light_array, background);
+      pix_info[current_pix].r = (clamp(color[0]) * 255);
+      pix_info[current_pix].g = (clamp(color[1]) * 255);
+      pix_info[current_pix].b = (clamp(color[2]) * 255);
       current_pix++;
     }
   }
   return(pix_info);
+}
+
+double clamp(double v){
+  if (v > 1.0)
+    return(1.0);
+  else if (v < 0.0)
+    return(0.0);
+  else
+    return(v);
 }
 
 double sphere_intersection (V3 Rd, V3 Ro, Object obj){
