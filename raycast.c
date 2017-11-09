@@ -149,7 +149,7 @@ double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Ob
   Object closest_obj;
   double* background_color = background; 
   double* color_array = malloc(sizeof(double) * 3);
-  double closest_t = INFINITY;
+  double closest_t = -INFINITY;
   double t;
   Object obj;
   
@@ -158,7 +158,7 @@ double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Ob
     if (obj.kind == 2){
       //sphere intersection
       t = sphere_intersection(Rd, Ro, obj);
-      if (t < closest_t){
+      if (t > closest_t){
 	closest_t = t;
 	closest_obj = array[i];
       }
@@ -167,7 +167,7 @@ double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Ob
     if (obj.kind == 3){
       //plane intersection
       t = plane_intersection(Rd, Ro, obj);
-      if (t < closest_t){
+      if (t > closest_t){
 	closest_t = t;
 	closest_obj = array[i];
       }
@@ -185,7 +185,9 @@ double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Ob
   double* diff = malloc(sizeof(double) * 3);
   double* spec = malloc(sizeof(double) * 3);
   double attenuation;
-
+  double* N = malloc(sizeof(double) * 3);
+  double* E = malloc(sizeof(double) * 3);
+  
   //Getting arrays to add the diffuse and specualr reflections
   v3_assign(diffuse_add, 0, 0, 0);
   v3_assign(specular_add, 0, 0, 0);
@@ -194,11 +196,25 @@ double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Ob
   v3_scale(Rdt, Rd, closest_t);
   v3_add(intersection_point, Ro, Rdt);
   v3_assign(color_array, 0, 0, 0);
-  
-  if (closest_t != INFINITY){
+
+  if (closest_t != -INFINITY){
+    if (closest_obj.kind == 2){
+      double x, y, z;
+      x = (intersection_point[0] - obj.position[0])/obj.radius;
+      y = (intersection_point[1] - obj.position[1])/obj.radius;
+      z = (intersection_point[2] - obj.position[2])/obj.radius;
+      v3_assign(N, x, y, z);
+    }
+
+    if (closest_obj.kind == 3){
+      N = closest_obj.normal;
+    }
+    
+    v3_assign(E, N[0]/2, N[1]/2, N[2]/2);
+    
     for (int i = 0; i < light_count; i++){
       Object l = light_array[i];
-      Ro2 = intersection_point;
+      v3_add(Ro2, intersection_point, E);
 
       //Normalizing Rd2
       v3_sub(Rd2, l.position, intersection_point);
@@ -226,23 +242,11 @@ double* raycast (V3 Rd, V3 Ro, int obj_count, int light_count, Object *array, Ob
       }
       
       
-      if (closest_obj.kind == 2){
-	diff = idiff(closest_obj, l, intersection_point);
-	v3_add(diffuse_add, diffuse_add, diff);
-	spec = ispec(closest_obj, l, intersection_point);
-	v3_add(specular_add, specular_add, spec);
-	v3_add(color_array, diffuse_add, specular_add);
-      }
-
-      if (closest_obj.kind == 3){
-	printf("in plane\n");
-	diff = idiff(closest_obj, l, intersection_point);
-	v3_add(diffuse_add, diffuse_add, diff);
-	v3_add(color_array, color_array, diffuse_add);
-      }
-      
-      attenuation = f_rad * f_ang;
-      v3_scale(color_array, color_array, attenuation);
+      diff = idiff(closest_obj, l, intersection_point);
+      spec = ispec(closest_obj, l, intersection_point);
+      v3_add(color_array, diff, spec);
+      v3_scale(color_array, color_array, f_rad);
+      v3_scale(color_array, color_array, f_ang);
     }
     return(color_array);
   }else{
@@ -304,7 +308,7 @@ double* ispec(Object obj, Object light, double* intersection){
   double* R = malloc(sizeof(double) * 3);
   double* spec_array = malloc(sizeof(double) * 3);
   double vn, r, g, b, dot;
-  v3_scale(V, intersection, -1);
+  v3_sub(V, light.position, intersection);
 
   if (obj.kind == 2){
     //Creating the normal
@@ -315,33 +319,15 @@ double* ispec(Object obj, Object light, double* intersection){
     z = (intersection[2] - obj.position[2])/obj.radius;
     v3_assign(N, x, y, z);
 
+    //Normalizing v
+    double mag = sqrt(pow(V[0], 2) + pow(V[1], 2) + pow(V[2], 2));
+    v3_assign(V, V[0]/mag, V[1]/mag, V[2]/mag);
+    
     //Creating R
     vn = v3_dot(V, N);
     vn = vn * 2;
+    v3_scale(N, N, vn);
     v3_sub(R, N, V);
-    v3_scale(R, R, vn);
-
-    dot = v3_dot(V, R);
-    if (dot > 0){
-      dot = pow(dot, 100);
-      r = obj.specular[0] * light.color[0] * dot;
-      g = obj.specular[1] * light.color[1] * dot;
-      b = obj.specular[2] * light.color[2] * dot;
-
-      v3_assign(spec_array, r, g, b);
-      return(spec_array);
-    }else{
-      v3_assign(spec_array, 0, 0, 0);
-      return(spec_array);
-    }
-  }
-
-  if (obj.kind == 3){
-    //Creating R
-    vn = v3_dot(V, obj.normal);
-    vn = vn * 2;
-    v3_sub(R, obj.normal, V);
-    v3_scale(R, R, vn);
 
     dot = v3_dot(V, R);
     if (dot > 0){
@@ -356,6 +342,11 @@ double* ispec(Object obj, Object light, double* intersection){
       v3_assign(spec_array, 0, 0, 0);
       return(spec_array);
     }
+  }
+
+  if (obj.kind == 3){
+    v3_assign(spec_array, 0, 0, 0);
+    return(spec_array);   
   }
 }
     
@@ -442,7 +433,7 @@ double sphere_intersection (V3 Rd, V3 Ro, Object obj){
   double dis;
   dis = pow(B,2) - (4 * C); 
   if (dis < 0){
-    return(INFINITY);
+    return(-INFINITY);
   }
   
   //Calculating for t0 and t1
@@ -488,7 +479,7 @@ double plane_intersection (V3 Rd, V3 Ro, Object obj){
     double temp_bot = v3_dot(Pn, Rd);
     t = -(temp_top/temp_bot);
     if (t < 0){
-      return(INFINITY);
+      return(-INFINITY);
     }else{
       return(t);
     }
