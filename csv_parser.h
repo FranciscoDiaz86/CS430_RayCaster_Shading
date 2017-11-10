@@ -5,8 +5,8 @@
 
 typedef struct{
   int kind;
-  double position[3], color[3], normal[3], diffuse[3], specular[3];
-  double width, height, radius, theta, alpha, radial_a0, radial_a1, radial_a2;
+  double position[3], color[3], normal[3], diffuse[3], specular[3], direction[3];
+  double width, height, radius, theta, angular_a0, radial_a0, radial_a1, radial_a2;
 }Object;
 
 int parse_width(FILE *fh, Object *obj);
@@ -21,6 +21,8 @@ int parse_theta(FILE *fh, Object *obj);
 int parse_radial_a0(FILE *fh, Object *obj);
 int parse_radial_a1(FILE *fh, Object *obj);
 int parse_radial_a2(FILE *fh, Object *obj);
+int parse_direction(FILE *fh, Object *obj);
+int parse_angular_a0(FILE *fh, Object *obj);
 
 int parse_type(FILE *fh, Object *obj){
   int chr;
@@ -132,6 +134,15 @@ int parse_field(FILE *fh, Object *obj){
 	chr = fgetc(fh);
 	buff_pos = 0;
       }
+
+      if((strcmp(buff, "direction")) == 0){
+	int current_fptr = parse_direction(fh, obj);
+	if(current_fptr == '\n'){
+	  break;
+	}
+	chr = fgetc(fh);
+	buff_pos = 0;
+      }
       
       if((strcmp(buff, "diffuse_color")) == 0){
 	int current_fptr = parse_diffuse(fh, obj);
@@ -181,6 +192,15 @@ int parse_field(FILE *fh, Object *obj){
       if((strcmp(buff, "radial-a2")) == 0){
 	int current_fptr = parse_radial_a2(fh, obj);
 	if(current_fptr == '\n'){
+	  break;
+	}
+	chr = fgetc(fh);
+	buff_pos = 0;
+      }
+
+      if((strcmp(buff, "angular-a0")) == 0){
+	int current_fptr = parse_angular_a0(fh, obj);
+	if(current_fptr = '\n'){
 	  break;
 	}
 	chr = fgetc(fh);
@@ -644,5 +664,85 @@ int parse_radial_a2(FILE *fh, Object *obj){
   }
   obj_a2 = atof(buff);
   obj -> radial_a2 = obj_a2;
+  return(chr);
+}
+
+int parse_angular_a0(FILE *fh, Object *obj){
+  double obj_a0;
+  char buff[255];
+  int buff_pos = 0;
+  int chr;
+
+  chr = fgetc(fh);
+  while(chr != EOF){
+    if(chr == ',' || chr == '\n'){
+      break;
+    }
+    
+    if(chr == ' '){
+      chr = fgetc(fh);
+    }
+
+    if(chr != ' ' && chr != ','){
+      buff[buff_pos] = chr;
+      buff[buff_pos + 1] = '\0';
+      buff_pos++;
+      chr = fgetc(fh);
+    }
+  }
+  obj_a0 = atof(buff);
+  obj -> angular_a0 = obj_a0;
+  return(chr);
+}
+
+int parse_direction(FILE *fh, Object *obj){
+  double obj_direction;
+  char buff[255];
+  int buff_pos = 0;
+  int clr_pos = 0;
+  int chr;
+
+  chr = fgetc(fh);
+  while(chr != EOF){
+    if(chr == ',' || chr == '\n'){
+      break;
+    }
+
+    if(chr == ' '){
+      chr = fgetc(fh);
+    }
+
+    if(chr == '['){
+      chr = fgetc(fh);
+      while(1){
+	if(chr == ']'){
+	  obj_direction = atof(buff);
+	  obj -> direction[clr_pos] = obj_direction;
+	  chr = fgetc(fh);
+	  break;
+	}
+	if(chr == ' '){
+	  chr = fgetc(fh);
+	}
+
+	if(chr == ','){
+	  obj_direction = atof(buff);
+	  obj -> direction[clr_pos] = obj_direction;
+	  clr_pos++;
+	  buff_pos = 0;
+	  chr = fgetc(fh);
+	}
+
+	if(chr != ' ' && chr != ','){
+	  buff[buff_pos] = chr;
+	  buff[buff_pos + 1] = '\0';
+	  buff_pos++;
+	  chr = fgetc(fh);
+	}
+      }
+      break;
+    }
+  }
+  chr = fgetc(fh);
   return(chr);
 }
